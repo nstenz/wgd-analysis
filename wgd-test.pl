@@ -3,9 +3,9 @@ use strict;
 use warnings;
 use Getopt::Long;
 use Cwd qw(abs_path);
-use POSIX qw(:sys_wait_h);
 use Time::HiRes qw(usleep);
 use Fcntl qw(:flock SEEK_END);
+use POSIX qw(:sys_wait_h ceil);
 use File::Path qw(remove_tree);
 
 # For reverse translating peptides
@@ -43,9 +43,11 @@ my $cutoff = 70; # bootstrap support for RAxML
 my $pid_cutoff = 80; # minimum amino acid percent identity in alignments
 
 # Where we will output results
+my $kaks_calc_in_dir = "kaks-in";
+my $kaks_calc_out_dir = "kaks-out";
 my $output_dir = "wgd-test-".int(time());
 
-# check that dependencies are present in user's PATH
+# Check that dependencies are present in user's PATH
 my $blat = check_path_for_exec("blat");
 my $blastp = check_path_for_exec("blastp");
 my $muscle = check_path_for_exec("muscle");
@@ -104,12 +106,13 @@ foreach my $transcriptome (@transcriptomes) {
 	$transcriptome = abs_path($transcriptome);	
 }
 
-# Create the output directory
+# Create the output directories
 mkdir($output_dir) if (!-e $output_dir);
+mkdir("$output_dir/genes") if (!-e "$output_dir/genes");
 
 # Move to output directory, remove result files
 chdir($output_dir);
-unlink("against.txt", "support.txt");
+unlink("wgd.against.txt", "wgd.support.txt");
 
 # Translate transcriptomes into most likely proteome
 my @pids;
@@ -135,7 +138,7 @@ foreach my $index (0 .. $#transcriptomes) {
 		# Store output filename
 		(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
 		#my $output_file = $transcriptome_name.".ks_$lower_ks-$upper_ks.fasta";
-		my $output_file = $transcriptome_name.".ks_$lower_ks-$upper_ks";
+		my $output_file = $transcriptome_name.".$model.ks_$lower_ks-$upper_ks";
 		push(@gene_pairs, $output_file);
 
 		# Store child pid
@@ -207,7 +210,8 @@ foreach my $index (0 .. $#species_order) {
 	print $transcriptomes[$index],"\n";
 	print $species_order[$index],"\n";
 	#(my $file = $species_order[$index]) =~ s/\.ks_.*?-.*?\.fasta$/.fasta.transdecoder.pep/;
-	(my $file = $species_order[$index]) =~ s/\.fasta\.ks_.*?-.*?$/.fasta.transdecoder.pep/;
+	#(my $file = $species_order[$index]) =~ s/\.fasta\.ks_.*?-.*?$/.fasta.transdecoder.pep/;
+	(my $file = $species_order[$index]) =~ s/\.fasta\.$model\.ks_.*?-.*?$/.fasta.transdecoder.pep/;
 	print $file,"\n";
 	$transcriptomes[$index] = $file;
 }
@@ -240,26 +244,93 @@ foreach my $pid (@pids) {
 sub extract_protein_pairs {
 	my ($transcriptome, $lower_ks, $upper_ks) = @_;
 
+	# Extract name of transcriptome file
 	(my $base_name = $transcriptome) =~ s/(.*\/)?(.*)\..*/$2/;
 	(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
-	#my $output_file = $transcriptome_name.".ks_$lower_ks-$upper_ks.fasta";
-	my $output_file = $transcriptome_name.".ks_$lower_ks-$upper_ks";
+	my $output_file = $transcriptome_name.".$model.ks_$lower_ks-$upper_ks";
 
-	# TransDecoder output filename
+	# TransDecoder output filenames
+	my $cds = "$transcriptome_name.transdecoder.cds";
 	my $proteome = $transcriptome_name.".transdecoder.pep";
 
 	# Check if TransDecoder output already exists, run if it doesn't
 	if (!-e $proteome) {
 		print "Running TransDecoder on '$transcriptome'...\n";
-		#run_transdecoder($transcriptome);
+		run_transdecoder($transcriptome);
 		print "Finished TransDecoder for '$transcriptome.\n";
 	}
 	else {
 		print "Using TransDecoder output in file '$proteome'...\n";
 	}
 
-	# Parse TransDecoder CDS
-	my %cds = parse_fasta("$transcriptome_name.transdecoder.cds");
+	# Check whether or not we have KaKs_Calculator output for this model
+	#if (!-e "$base_name.$model.kaks") {
+	if (!-e $output_file) {
+
+		# Run all versus all self-blat
+		my %matches = run_self_blat($proteome, $cds);
+
+		# Write .atx input file for KaKs_Calculator
+		open(my $blat_atx, ">", "$base_name.atx");
+		foreach my $key (sort { $a cmp $b} keys %matches) {
+			my $pair = $matches{$key};
+
+			(my $query_name = $key) =~ s/q_(.*)_t_.*/$1/;
+			(my $match_name = $key) =~ s/q_.*_t_(.*)/$1/;
+
+			print {$blat_atx} ">$key\n";
+			print {$blat_atx} "$pair->{QUERY_ALIGN}\n";
+			print {$blat_atx} "$pair->{MATCH_ALIGN}\n\n";
+		}
+		close($blat_atx);
+
+		# Use KaKs_Calculator to determine Ks between homologus pairs
+		run_kaks_calc("$base_name.atx", "$base_name.$model.kaks");
+
+		# Calculate how many hits we found
+		my $num_matches = scalar(keys %matches);
+		die "No homologs meeting the nucleotide length threshold found.\n" if (!$num_matches);
+		print "$num_matches pair(s) met the requirements.\n";
+
+		# Select gene pairs with Ks between $lower_ks and $upper_ks
+		my %genes;
+
+		# Parse and filter KaKs_Calculator output
+		open(my $gene_subset, ">", $output_file);
+		open(my $kaks_output, "<", "$base_name.$model.kaks");
+		while (my $line = <$kaks_output>) {
+			chomp($line);
+
+			# Skip header line
+			next if ($line =~ /^Sequence/);
+
+			# Extract Ks for each pair
+			my @line = split(/\s+/, $line);
+			my $ks = $line[3];
+			$ks = 0 if ($ks eq "NA");
+
+			# Check that Ks is within specified range
+			if ($ks >= $lower_ks && $ks <= $upper_ks) {
+				(my $pair_name = $line[0]) =~ s/^>//;
+
+				if ($pair_name =~ /q_.*_t_.*/) {
+					my $pair = $matches{$pair_name};
+					print {$gene_subset} ">$pair_name\n";
+					print {$gene_subset} $pair->{QUERY_ALIGN_PROT},"\n";
+				}
+			}
+		}
+		close($kaks_output);
+		close($gene_subset);
+	}
+
+	return;
+}
+
+sub run_self_blat {
+	my ($proteome, $cds) = @_;
+
+	my %cds = parse_fasta($cds);
 
 	# Perform self-blat at protein level
 	my $return = system("$blat '$proteome' '$proteome' -prot -out=pslx -noHead $proteome.pslx") if (!-e "$proteome.pslx");
@@ -335,62 +406,66 @@ sub extract_protein_pairs {
 	}
 	close($blat_output);
 
-	# Calculate how many hits we found
-	my $num_matches = scalar(keys %matches);
-	die "No homologs meeting the nucleotide length threshold found.\n" if (!$num_matches);
-	print "$num_matches pair(s) met the requirements.\n";
+	return %matches;
+}
 
-	# Write .atx input file for KaKs_Calculator
-	open(my $blat_atx, ">", "$base_name.atx");
-	foreach my $key (sort { $a cmp $b} keys %matches) {
-		my $pair = $matches{$key};
+sub run_kaks_calc {
+	my ($full_atx, $output) = @_;
 
-		(my $query_name = $key) =~ s/q_(.*)_t_.*/$1/;
-		(my $match_name = $key) =~ s/q_.*_t_(.*)/$1/;
+	# Run KaKs_Calculator to get Ks values
+	print "Running KaKs_Calculator...\n";
 
-		print {$blat_atx} ">$key\n";
-		print {$blat_atx} "$pair->{QUERY_ALIGN}\n";
-		print {$blat_atx} "$pair->{MATCH_ALIGN}\n\n";
-	}
-	close($blat_atx);
+	# Determine how to split the input file
+	chomp(my $total_hits = `wc -l $full_atx`);
+	$total_hits =~ s/(^\s*\d+).*/$1/;
+	$total_hits = $total_hits / 4;
 
-	# Use KaKs_Calculator to determine Ks between homologus pairs
-	$return = system("$kaks_calc -i '$base_name.atx' -o '$base_name.kaks' -m $model >/dev/null") if (!-e "$base_name.kaks");
-	die "Error running KaKs_Calculator: '$return'.\n" if ($return);
+	# Calculate how many lines each fork gets
+	my $lines_per_thread = ceil($total_hits / $free_cpus) * 4;
 
-	# Select gene pairs with Ks between $lower_ks and $upper_ks
-	my %genes;
+	# Create the directories that will hold the split files and their KaKs_Calculator output
+	mkdir("$kaks_calc_in_dir") || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
+	mkdir("$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
 
-	open(my $kaks_output, "<", $base_name.".kaks");
-	open(my $gene_subset, ">", $output_file);
+	# Split the files
+	#run_cmd("split -l $lines_per_thread $paralogs_seqs $kaks_calc_in_dir/$paralogs_seqs.");
+	my $return = system("split -l $lines_per_thread '$full_atx' '$kaks_calc_in_dir/$full_atx.'");
+	die "Error splitting '$full_atx': '$return'.\n" if ($return);
 
-	# Parse KaKs_Calculator output
-	while (my $line = <$kaks_output>) {
-		chomp($line);
+	# Run each instance of KaKs_Calculator
+	my @pids;
+	foreach my $file (glob("$kaks_calc_in_dir/$full_atx.*")) {
 
-		# Skip header line
-		next if ($line =~ /^Sequence/);
+		(my $file_id = $file) =~ s/.*\.(\S+$)/$1/;
 
-		# Extract Ks for each pair
-		my @line = split(/\s+/, $line);
-		my $ks = $line[3];
-		$ks = 0 if ($ks eq "NA");
+		# Fork
+		my $pid = fork();
+		if ($pid == 0) {
+			# Child 
+			$return = system("$kaks_calc -i '$file' -o '$kaks_calc_out_dir/$output.$file_id' -m $model >/dev/null");
 
-		# Check that Ks is within specified range
-		if ($ks >= $lower_ks && $ks <= $upper_ks) {
-			(my $pair_name = $line[0]) =~ s/^>//;
-
-			if ($pair_name =~ /q_.*_t_.*/) {
-				my $pair = $matches{$pair_name};
-				print {$gene_subset} ">$pair_name\n";
-				print {$gene_subset} $pair->{QUERY_ALIGN_PROT},"\n";
-			}
+			exit(0);
+		}
+		else {
+			# Parent
+			push(@pids, $pid);
 		}
 	}
-	close($kaks_output);
-	close($gene_subset);
 
-	return;
+	# Don't let forks become zombies
+	foreach my $pid (@pids) {
+		waitpid($pid, 0);
+	}
+
+	# Combine all the output files generated by the multiple forks
+	$return = system("cat $kaks_calc_out_dir/$output.* > $output");
+	die "Error concatenating KaKs output files.\n" if ($return);
+
+	# Clean up
+	remove_tree($kaks_calc_in_dir);
+	remove_tree($kaks_calc_out_dir);
+
+	print "Completed KaKs_Calculator.\n";
 }
 
 sub analyze_family {
@@ -425,10 +500,16 @@ sub analyze_family {
 		}
 	}
 
+	# Move into gene directory
+	chdir("genes");
+
 #	# Set output filenames
 #	my $family_raw = "$output_dir/$id-raw.fasta";
 #	my $family_aligned = "$output_dir/$id-aligned.nex";
 #	my $family_reduced = "$output_dir/$id-reduced.fasta";
+#	my $family_raw = "$id-raw.fasta";
+#	my $family_aligned = "$id-aligned.nex";
+#	my $family_reduced = "$id-reduced.fasta";
 	my $family_raw = "$id-raw.fasta";
 	my $family_aligned = "$id-aligned.nex";
 	my $family_reduced = "$id-reduced.fasta";
@@ -537,9 +618,8 @@ sub analyze_family {
 	foreach my $taxon (keys %counts) {
 		my $count = $counts{$taxon};
 		if ($count < $total_members - 1) {
-			die "[$id] Some taxa did not share homology.\n";
 			unlink(@unlink);
-			exit(0);
+			die "[$id] Some taxa did not share homology.\n";
 		}
 	}
 
@@ -585,10 +665,9 @@ sub analyze_family {
 			my $taxon2 = (keys %family_aligned)[$index2];
 			my $pid = get_pid($family_aligned{$taxon1}, $family_aligned{$taxon2});
 
-			#die "[$id] Pairwise similarity between sequences was too low ($pid).\n" if ($pid < $pid_cutoff);
-			
 			# Stop analysis if pid between a pair of sequences is too
 			if ($pid < $pid_cutoff) {
+				unlink(@unlink);
 				die "[$id] Pairwise similarity between sequences was too low ($pid).\n";
 			}
 		}
@@ -632,13 +711,16 @@ sub analyze_family {
 		print "[$id] tree: $tree_no_bls\n";
 		print "[$id] $taxon_1 and $taxon_2 are in a clade with $bootstrap% support.\n";
 
-		die "[$id] RAxML tree does not have high enough support.\n" if ($bootstrap < $cutoff);
+		if ($bootstrap < $cutoff) {
+			unlink(@unlink);
+			die "[$id] RAxML tree does not have high enough support.\n";
+		}
 
 		if ($taxon_1 eq $taxon_2) {
-			$out_file_name = "against.txt";
+			$out_file_name = "../wgd.against.txt";
 		}
 		else {
-			$out_file_name = "support.txt";
+			$out_file_name = "../wgd.support.txt";
 		}
 	}
 	else {
@@ -985,7 +1067,8 @@ sub run_transdecoder {
 	my $transcriptome = shift;
 
 	# TransDecoder working directory name
-	my $transdecoder_out_dir = "transdecoder-$transcriptome";
+	(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
+	my $transdecoder_out_dir = "transdecoder-$transcriptome_name";
 
 	# Check if the files we need from TransDecoder are present
 	if (!-e "$transcriptome.transdecoder.pep" || !-e "$transcriptome.transdecoder.mRNA") {
@@ -1003,7 +1086,7 @@ sub run_transdecoder {
 			else {
 				system("$transdecoder_predict -t '$transcriptome'");
 			}
-			remove_tree("$transcriptome.transdecoder_dir/");
+			remove_tree("$transcriptome_name.transdecoder_dir/");
 		}
 		# Old version of TransDecoder
 		else {
