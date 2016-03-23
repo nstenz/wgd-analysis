@@ -39,8 +39,8 @@ my %rev_codon_table = (
 my $free_cpus = get_free_cpus();
 
 # Cutoff values
-my $cutoff = 70; # bootstrap support for RAxML
 my $pid_cutoff = 80; # minimum amino acid percent identity in alignments
+my $boot_cutoff = 70; # bootstrap support for RAxML
 
 # Where we will output results
 my $kaks_calc_in_dir = "kaks-in";
@@ -61,7 +61,7 @@ my $transdecoder = check_path_for_exec("TransDecoder", 1);
 my $transdecoder_orfs = check_path_for_exec("TransDecoder.LongOrfs", 1);
 my $transdecoder_predict = check_path_for_exec("TransDecoder.Predict", 1);
 if (!defined($transdecoder) || (!defined($transdecoder_orfs) && !defined($transdecoder_predict))) {
-	die "Could not locate required TransDecoder executables (TransDecoder or TransDecoder.LongOrfs and TransDecoder.Predict) in PATH.\n" 
+	die "Could not locate required TransDecoder executables (TransDecoder or TransDecoder.LongOrfs and TransDecoder.Predict) in \$PATH.\n" 
 }
 
 # Pfam settings
@@ -77,7 +77,7 @@ my %ks;
 my $lower_ks;
 my $upper_ks;
 my $model = "YN";
-my $threshold = 300; # TODO: more specific name
+#my $threshold = 300; # TODO: more specific name
 my $min_contig_length = 300;
 my @transcriptomes;
 GetOptions(
@@ -85,8 +85,12 @@ GetOptions(
 	"ks|k=s"                  => \&get_ks_range,
 	"model|m=s"               => \$model,
 	"output|o=s"              => \$output_dir,
+	"n-threads|T=i"           => \$free_cpus,
+	"pid-cut|c=i"             => \$pid_cutoff,
+	"boot-cut|b=i"            => \$boot_cutoff,
 	"pfam-cpus|p=i"           => \$pfam_cpus,
 	"pfam-search|s=s"         => \$pfam_search,
+	"min-length|l=i"          => \$min_contig_length,
 	"transcriptomes|t=s{2,2}" => \@transcriptomes,
 );
 
@@ -128,6 +132,7 @@ foreach my $index (0 .. $#transcriptomes) {
 	# Wait until a CPU is free
 	until(okay_to_run(\@pids)) {};
 
+	# Perform fork
 	my $pid = fork();
 	if ($pid == 0) {
 		setpgrp();
@@ -137,7 +142,6 @@ foreach my $index (0 .. $#transcriptomes) {
 	else {
 		# Store output filename
 		(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
-		#my $output_file = $transcriptome_name.".ks_$lower_ks-$upper_ks.fasta";
 		my $output_file = $transcriptome_name.".$model.ks_$lower_ks-$upper_ks";
 		push(@gene_pairs, $output_file);
 
@@ -192,6 +196,7 @@ while (my $line = <$ortho_output>) {
 		$families{$count} = \@contigs;
 		$count++;
 
+		# Output info about group
 		print "$count: ";
 		foreach my $contig (@contigs) {
 			print "@{$contig} ";
@@ -212,7 +217,6 @@ foreach my $index (0 .. $#species_order) {
 	#(my $file = $species_order[$index]) =~ s/\.ks_.*?-.*?\.fasta$/.fasta.transdecoder.pep/;
 	#(my $file = $species_order[$index]) =~ s/\.fasta\.ks_.*?-.*?$/.fasta.transdecoder.pep/;
 	(my $file = $species_order[$index]) =~ s/\.fasta\.$model\.ks_.*?-.*?$/.fasta.transdecoder.pep/;
-	print $file,"\n";
 	$transcriptomes[$index] = $file;
 }
 
@@ -264,7 +268,6 @@ sub extract_protein_pairs {
 	}
 
 	# Check whether or not we have KaKs_Calculator output for this model
-	#if (!-e "$base_name.$model.kaks") {
 	if (!-e $output_file) {
 
 		# Run all versus all self-blat
@@ -330,6 +333,7 @@ sub extract_protein_pairs {
 sub run_self_blat {
 	my ($proteome, $cds) = @_;
 
+	# Load CDS sequences
 	my %cds = parse_fasta($cds);
 
 	# Perform self-blat at protein level
@@ -354,7 +358,8 @@ sub run_self_blat {
 		my $match_length = $match + $mismatch;
 
 		# Skip hit if it is too short (3 * match_length = length nucleotides);
-		next if ($match_length * 3 < $threshold);
+		#next if ($match_length * 3 < $threshold);
+		next if ($match_length * 3 < $min_contig_length);
 
 		# Extract query and match protein sequences
 		my @query_align =  split(",", $query_align);
@@ -483,11 +488,14 @@ sub analyze_family {
 	foreach my $index (0 .. $#members) {
 		my $member = $members[$index];
 
-		(my $transcriptome_name = $transcriptomes[$index]) =~ s/(.*\/)?(.*)/$2/;
+		# Get name info for this member
+		#(my $transcriptome_name = $transcriptomes[$index]) =~ s/(.*\/)?(.*)/$2/;
 		(my $base_name = $transcriptomes[$index]) =~ s/(.*\/)?(.*)\.fa(sta)?\.transdecoder\.pep/$2/;
-
 		(my $cds_file = $transcriptomes[$index]) =~ s/\.pep$/.cds/;
+		
 		foreach my $index2 (0 .. scalar(@{$member}) - 1) {
+
+			# Get sequence for this member
 			my $contig = @{$member}[$index2];
 			my $sequence = get_seq_from_fasta({'FILE' => $transcriptomes[$index], 'TAXON' => $contig});
 			my $nuc_sequence = get_seq_from_fasta({'FILE' => $cds_file, 'TAXON' => $contig});
@@ -503,13 +511,7 @@ sub analyze_family {
 	# Move into gene directory
 	chdir("genes");
 
-#	# Set output filenames
-#	my $family_raw = "$output_dir/$id-raw.fasta";
-#	my $family_aligned = "$output_dir/$id-aligned.nex";
-#	my $family_reduced = "$output_dir/$id-reduced.fasta";
-#	my $family_raw = "$id-raw.fasta";
-#	my $family_aligned = "$id-aligned.nex";
-#	my $family_reduced = "$id-reduced.fasta";
+	# Set output filenames
 	my $family_raw = "$id-raw.fasta";
 	my $family_aligned = "$id-aligned.nex";
 	my $family_reduced = "$id-reduced.fasta";
@@ -550,7 +552,7 @@ sub analyze_family {
 	foreach my $index (0 .. $#lines) {
 		my $line = $lines[$index];
 
-		# Split line on tabs
+		# Split line on tabs, assign corresponding values
 		my @line = split("\t", $line);
 		my ($query, $match, $q_start, $q_end, $s_start, $s_end) = ($line[0], $line[1], $line[2], $line[3], $line[4], $line[5]);
 
@@ -585,6 +587,7 @@ sub analyze_family {
 			my $current_match_q_range = (keys %{$matches{"$query-$match"}})[0];
 			my $current_match_s_range = (values %{$matches{"$query-$match"}})[0];
 
+			# If the hits do not overlap, get their union
 			my $s_intersection = intersection($current_match_s_range, $s_range);
 			if ($s_intersection eq "0-0") {
 
@@ -683,8 +686,6 @@ sub analyze_family {
 	write_phylip({'OUT' => $family_aligned, 'ALIGN' => \%family_aligned_nuc});
 
 	# Run RAxML
-	#chdir($output_dir);
-	#$return = system("$raxml -f a -m GTRGAMMA -p 123123 -x 123123 -#100 -s '../$family_aligned' -n $id >/dev/null");
 	$return = system("$raxml -f a -m GTRGAMMA -p 123123 -x 123123 -#100 -s '$family_aligned' -n $id >/dev/null");
 	die "Error running raxml: '$return'.\n" if ($return);
 
@@ -711,7 +712,8 @@ sub analyze_family {
 		print "[$id] tree: $tree_no_bls\n";
 		print "[$id] $taxon_1 and $taxon_2 are in a clade with $bootstrap% support.\n";
 
-		if ($bootstrap < $cutoff) {
+		# Check if we met the threshold
+		if ($bootstrap < $boot_cutoff) {
 			unlink(@unlink);
 			die "[$id] RAxML tree does not have high enough support.\n";
 		}
@@ -728,6 +730,7 @@ sub analyze_family {
 	}
 
 	# Add family to corresponding output file
+	# Get file lock on CSV so we don't have multiple simultaneous writes
 	open(my $out_file, ">>", $out_file_name);
 	flock($out_file, LOCK_EX) || die "Could not lock '$out_file': $!.\n";
 	seek($out_file, 0, SEEK_END) || die "Could not seek '$out_file': $!.\n";
@@ -737,6 +740,7 @@ sub analyze_family {
 	flock($out_file, LOCK_UN) || die "Could not unlock '$out_file': $!.\n";
 	close($out_file);
 
+	# Cleanup
 	unlink(@unlink);
 }
 
@@ -795,6 +799,12 @@ sub get_ks_range {
 		# Check that parsed Ks is a number
 		die "Lower Ks bound '$ks_range[0]' is not a number.\n" if ($ks_range[0] !~ /^(\d*\.)?\d+$/);
 		die "Upper Ks bound '$ks_range[1]' is not a number.\n" if ($ks_range[1] !~ /^(\d*\.)?\d+$/);
+	}
+
+	# If only one range is specified, use it for both
+	if (scalar(@ks_ranges) == 1) {
+		$ks{"1-LOWER"} = $ks{"0-LOWER"};
+		$ks{"1-UPPER"} = $ks{"0-UPPER"};
 	}
 
 	return;
@@ -1156,11 +1166,47 @@ sub get_free_cpus {
 	return $free_cpus;
 }
 
-sub help {
-	return "";
-}
-
 sub usage {
-	return "";
+	return "Usage: perl wgd-test.pl -t [TRANSCRIPTOME1 TRANSCRIPTOME2] --ks [KS_MIN1-KS_MAX1,KS_MIN2-KS_MAX2]...\n";
 }
 
+#	"help|h"                  => \&help,
+#	"ks|k=s"                  => \&get_ks_range,
+#	"model|m=s"               => \$model,
+#	"output|o=s"              => \$output_dir,
+#	"n-threads|T=i"           => \$free_cpus,
+#	"pid-cut|c=i"             => \$pid_cutoff,
+#	"boot-cut|b=i"            => \$boot_cutoff,
+#	"pfam-cpus|p=i"           => \$pfam_cpus,
+#	"pfam-search|s=s"         => \$pfam_search,
+#	"min-length|l=i"          => \$min_contig_length,
+#	"transcriptomes|t=s{2,2}" => \@transcriptomes,
+
+sub help {
+print <<EOF; 
+@{[usage()]}
+Generate a Ks plot for a given transcriptome in fasta format
+
+  -k, --ks                          range of Ks to search for each transcriptome
+  -t, --transcriptoimes             file names of transcriptomes to compare
+  -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
+                                        valid models: NG, LWL, LPB, MLWL, MLPB, GY, YN, MYN, MS, MA. See KaKs_Calculator doc for details.
+  -o, --output                      name of the directory to store output files in (default: "wgd-test-" + Unix time of script invocation)
+  -l, --min-length                  the minimum alignment length of paralogous sequences (default: 300 bp)
+  -p, --pid-cut                     minimum pairwise percent identity allowed between two members of a quartet (default: 80)
+  -b, --boot-cut                    minimum RAxML bootstrap support required to use a quartet (default: 70)
+  --pfam-cpus                       the number of CPUs to let hmmscan using during pfam analysis (default: current number of free CPUs)
+  --pfam-search                     full path to pfam binary for usage in pfam search
+  -T, --n-threads                   the number of CPUs to use during analysis (default: current number of free CPUs)
+  -h, --help                        display this help and exit
+
+Examples:
+  perl wgd-test.pl -t trans1.fa trans2.fa --ks 0.2-0.6                    check for WGD support in the 0.2-0.6 Ks range for trans1.fa and trans2.fa 
+
+  perl wgd-test.pl -t trans1.fa trans2.fa --ks 0.2-0.6,0.3-0.7 -m GY      check for WGD support in the 0.2-0.6 Ks range for trans1.fa and 0.3-0.7 range
+                                                                          for trans2.fa, use GY model to calculate Ks 
+
+Mail bug reports and suggestions to <noah.stenz.github\@gmail.com>
+EOF
+exit(0);
+}
