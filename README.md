@@ -66,7 +66,7 @@ wgd-test.pl -t trans1.fasta trans2.fasta -k 0.2-0.6
 	* **wgd.against.txt**: file containing a list of quartets which are against a shared WGD
 * **genes/**: directory containing quartet alignments (**-aligned.nex** files) and corresponding RAxML output files for genes which met all thresholds required for analysis
 * Note: there would be a corresponding **trans2** prefix for each of these output files
-* TransDecoder output for each input transcriptome ():
+* TransDecoder output for each input transcriptome:
 	* **trans1.fasta.transdecoder.bed**: bed output from TransDecoder
 	* **trans1.fasta.transdecoder.cds**: corresponding CDS of putative peptides identified
 	* **trans1.fasta.transdecoder.gff3**: gff3 output from TransDecoder
@@ -127,7 +127,7 @@ wgd-plot.pl -t trans1.fasta trans2.fasta
 	* Using the above files as input for wgd-plot.r would create **trans1.pdf** and **trans2.pdf**
 * **genes/**: directory containing quartet alignments (**-aligned.nex** files) and corresponding RAxML output files for genes which met all thresholds required for analysis
 * Note: there would be a corresponding **trans2** prefix for each of these output files
-* TransDecoder output for each input transcriptome ():
+* TransDecoder output for each input transcriptome:
 	* **trans1.fasta.transdecoder.bed**: bed output from TransDecoder
 	* **trans1.fasta.transdecoder.cds**: corresponding CDS of putative peptides identified
 	* **trans1.fasta.transdecoder.gff3**: gff3 output from TransDecoder
