@@ -25,6 +25,9 @@ if (!exists("input_csv")) {
 	q("no", status = 1);
 }
 
+# Parse name we will use for output
+out_name = sub("\\.csv$", ".pdf", input_csv, perl=T);
+
 # Sliding window mean function
 slideFunctMean <- function(data, window, step){
 	total <- length(data)
@@ -57,6 +60,6 @@ support = slideFunctMean(data[,2], window, step);
 
 data = data.frame(ks, support);
 
-pdf("wgd-plot.pdf");
+pdf(out_name);
 plot(data, type="l", main=paste0("Sliding window plot for '", input_csv, "'"), xlab=expression(paste('Initial Intraspecies Pairwise', ' K'[s])), ylab='Proportion of Quartets supporting WGD');
 dev.off();
