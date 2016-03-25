@@ -1368,11 +1368,10 @@ print <<EOF;
 @{[usage()]}
 Generate a Ks plot for a given transcriptome in fasta format
 
-  -k, --ks                          range of Ks to search for each transcriptome
-  -t, --transcriptoimes             file names of transcriptomes to compare
+  -t, --transcriptomes              file names of at least two transcriptomes (in FASTA format) to use for analyses
   -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
                                         valid models: NG, LWL, LPB, MLWL, MLPB, GY, YN, MYN, MS, MA. See KaKs_Calculator doc for details.
-  -o, --output                      name of the directory to store output files in (default: "wgd-test-" + Unix time of script invocation)
+  -o, --output                      name of the directory to store output files in (default: "wgd-plot-" + Unix time of script invocation)
   -l, --min-length                  the minimum alignment length of paralogous sequences (default: 300 bp)
   -p, --pid-cut                     minimum pairwise percent identity allowed between two members of a quartet (default: 60)
   -b, --boot-cut                    minimum RAxML bootstrap support required to use a quartet (default: 70)
@@ -1381,11 +1380,9 @@ Generate a Ks plot for a given transcriptome in fasta format
   -T, --n-threads                   the number of CPUs to use during analysis (default: current number of free CPUs)
   -h, --help                        display this help and exit
 
-Examples:
-  perl wgd-test.pl -t trans1.fa trans2.fa --ks 0.2-0.6                    check for WGD support in the 0.2-0.6 Ks range for trans1.fa and trans2.fa 
+Example:
+  perl wgd-plot.pl -t trans1.fa trans2.fa                                 create a sliding window plot for trans1.fa trans2.fa showing WGD support as a function of Ks 
 
-  perl wgd-test.pl -t trans1.fa trans2.fa --ks 0.2-0.6,0.3-0.7 -m GY      check for WGD support in the 0.2-0.6 Ks range for trans1.fa and 0.3-0.7 range
-                                                                          for trans2.fa, use GY model to calculate Ks 
 
 Mail bug reports and suggestions to <noah.stenz.github\@gmail.com>
 EOF

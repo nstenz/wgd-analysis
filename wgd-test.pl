@@ -1188,7 +1188,7 @@ print <<EOF;
 Generate a Ks plot for a given transcriptome in fasta format
 
   -k, --ks                          range of Ks to search for each transcriptome
-  -t, --transcriptoimes             file names of transcriptomes to compare
+  -t, --transcriptomes             file names of at least two transcriptomes (in FASTA format) to use for analyses
   -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
                                         valid models: NG, LWL, LPB, MLWL, MLPB, GY, YN, MYN, MS, MA. See KaKs_Calculator doc for details.
   -o, --output                      name of the directory to store output files in (default: "wgd-test-" + Unix time of script invocation)
