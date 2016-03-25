@@ -92,6 +92,12 @@ At the mininmum, the script requires two FASTA files specfied with -t or --trans
 wgd-plot.pl -t transcriptome1.fa transcriptome2.fa
 ```
 
+After successful completion of the script, the files **transcriptome1.csv** and **transcriptome2.csv** would be located in the output directory. A sliding window plot can be generated for a particular csv file by running the following command:
+
+```
+wgd-plot.r transcriptome1.csv
+```
+
 ### Command Line Options
 For further fine-tuning of the script, the following options can also be specified:
 
@@ -118,6 +124,7 @@ wgd-plot.pl -t trans1.fasta trans2.fasta
 * The two most important output files which are used to generate the plot. Each line corresponds to a single quartet, the first value is the Ks of the protein pair from the species's perspective, and the second value is boolean indicating whether or not the quartet supports a WGD (0 for against, 1 for support). These files are used as the input for wgd-plot.r:
 	* **trans1.csv**: file containing a list of quartets which support a shared WGD
 	* **trans2.csv**: file containing a list of quartets which are against a shared WGD
+	* Using the above files as input for wgd-plot.r would create **trans1.pdf** and **trans2.pdf**
 * **genes/**: directory containing quartet alignments (**-aligned.nex** files) and corresponding RAxML output files for genes which met all thresholds required for analysis
 * Note: there would be a corresponding **trans2** prefix for each of these output files
 * TransDecoder output for each input transcriptome ():
@@ -133,3 +140,4 @@ wgd-plot.pl -t trans1.fasta trans2.fasta
 * **wgd-plot.proteinortho**: output by ProteinOrtho, contains final sequence clustering information of input files. This the file parsed by the toca.pl to determine clustering
 * **wgd-plot.blast-graph**: output by ProteinOrtho, contains similarity scores between contigs as determined by blastp
 * **wgd-plot.proteinortho-graph**: output by ProteinOrtho, contains similarity scores between contigs as determined by blastp
+
