@@ -60,7 +60,7 @@ my $protein_ortho = check_path_for_exec("proteinortho5.pl");
 my $transdecoder = check_path_for_exec("TransDecoder", 1);
 my $transdecoder_orfs = check_path_for_exec("TransDecoder.LongOrfs", 1);
 my $transdecoder_predict = check_path_for_exec("TransDecoder.Predict", 1);
-if (!defined($transdecoder) || (!defined($transdecoder_orfs) && !defined($transdecoder_predict))) {
+if (!defined($transdecoder) && (!defined($transdecoder_orfs) && !defined($transdecoder_predict))) {
 	die "Could not locate required TransDecoder executables (TransDecoder or TransDecoder.LongOrfs and TransDecoder.Predict) in \$PATH.\n" 
 }
 
