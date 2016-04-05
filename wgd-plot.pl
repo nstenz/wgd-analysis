@@ -128,202 +128,13 @@ $SIG{INT} = sub { foreach my $pid (@pids) { kill -9, $pid }; exit(0); };
 foreach my $index (0 .. $#transcriptomes) {
 	my $transcriptome = $transcriptomes[$index];
 
-	# Wait until a CPU is free
-	until(okay_to_run(\@pids)) {};
+	# Identify protein pairs in transcriptome and calculate Ks
+	extract_protein_pairs($transcriptome);
 
-	# Perform fork
-	my $pid = fork();
-	if ($pid == 0) {
-		setpgrp();
-		extract_protein_pairs($transcriptome);
-		exit(0);
-	}
-	else {
-		# Store output filename
-		(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
-		my $output_file = $transcriptome_name.".$model.pairs.fasta";
-		push(@gene_pairs, $output_file);
-
-		# Store child pid
-		push(@pids, $pid);
-	}
-
-#	my $pid = fork();
-#	if ($pid == 0) {
-#
-#		my $proteome = $transcriptome.".transdecoder.pep";
-#
-#		if (!-e $proteome) {
-#			print "Running TransDecoder on '$transcriptome'...\n";
-#			my $return = system("$transdecoder -t $transcriptome >/dev/null");
-#			die "Error occurred while running TransDecoder: '$return'.\n" if ($return);
-#			print "Finished TransDecoder for '$transcriptome.\n";
-#		}
-#		else {
-#			print "Using TransDecoder output in file '$proteome'...\n";
-#		}
-#
-#		my %align = parse_fasta("$transcriptome.transdecoder.cds");
-#
-#		# Perform self-blat
-#		my $return = system("$blat $proteome $proteome -prot -out=pslx -noHead $proteome.pslx") if (!-e "$proteome.pslx");
-#		die "Error running self-blat: '$return'.\n" if ($return);
-#
-#		# Parse blat output 
-#		my (%queries, %matches);
-#		open(my $blat_output, "<", "$proteome.pslx");
-#		while (my $line = <$blat_output>) {
-#			chomp($line);
-#
-#			# split the line on tabs and extract the information we want
-#			my @line = split("\t", $line);
-#			#my ($query_name, $match_name, $query_align, $match_align) = 
-#			#	($line[9], $line[13], $line[21], $line[22]);
-#			my ($match, $mismatch, $query_name, $match_name, $query_align, $match_align) = 
-#				($line[0], $line[1], $line[9], $line[13], $line[21], $line[22]);
-#
-#			next if ("$query_name" eq "$match_name");
-#
-#			# exclude self match
-#			my $match_length = $match + $mismatch;
-#			#if ($query_name ne $match_name) {
-#
-#				next if ($match_length * 3 < $threshold);
-#
-#				my @query_align =  split(",", $query_align);
-#				my @match_align =  split(",", $match_align);
-#				my $query_align_prot = join("", @query_align);
-#
-#				my $query_nuc_align = $align{$query_name};
-#				my $match_nuc_align = $align{$match_name};
-#
-#				# Reverse translate protein matches to corresponding nucleotide sequences
-#				my $trans_query_align;
-#				foreach my $align (@query_align) {
-#					$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
-#				}
-#
-#				my $trans_match_align;
-#				foreach my $align (@match_align) {
-#					$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
-#				}
-#
-#				$query_align = $trans_query_align;
-#				$match_align = $trans_match_align;
-#
-#				my @names;
-#				push(@names, $query_name);
-#				push(@names, $match_name);
-#				@names = sort { "$a" cmp "$b" } @names;
-#
-#				#if (length($query_align) >= $threshold && length($match_align) >= $threshold) {
-#					#&& length($query_align) / $query_len >= $hit_frac && length($match_align) / $match_len >= $hit_frac) {
-#
-#				#	# Check that the match hasn't already been extracted in reverse order
-#					if (!exists($queries{"$match_name-$query_name"})) {
-#
-#						my $name = "q_$query_name"."_t_$match_name";
-#						#my $name = "q_$names[0]"."_t_$names[1]";
-#						my $pair = {'QUERY_ALIGN' => $query_align,
-#									'QUERY_ALIGN_PROT' => $query_align_prot,
-#									'MATCH_ALIGN' => $match_align,
-#									'LENGTH' => length($query_align)};
-#
-#						# Check if there is already a match between these two sequences
-#						# if there is a match, the longer one will be output
-#						my $current_hit = $matches{$name};
-#						#if (exists($matches{$name})) {
-#						if (defined($current_hit)) {
-#							#my $current_length = $matches{$name}->{'LENGTH'};
-#							my $current_length = $current_hit->{'LENGTH'};
-#							if ($current_length <= length($query_align)) {
-#								$matches{$name} = $pair;
-#							}
-#						}
-#						else {
-#							$matches{$name} = $pair;
-#						}
-#						$queries{"$query_name-$match_name"}++;
-#					}
-#				#}
-#			#}
-#		}
-#		close($blat_output);
-#
-#		my $num_matches = scalar(keys %matches);
-#		die "No homologs meeting the nucleotide length threshold found.\n" if (!$num_matches);
-#		print "$num_matches pair(s) met the requirements.\n";
-#
-#		# Write .atx input file for KaKs_Calculator
-#		open(my $blat_atx, ">", "$base_name.atx");
-#		foreach my $key (sort { $a cmp $b} keys %matches) {
-#			my $pair = $matches{$key};
-#
-#			(my $query_name = $key) =~ s/q_(.*)_t_.*/$1/;
-#			(my $match_name = $key) =~ s/q_.*_t_(.*)/$1/;
-#
-#			print {$blat_atx} ">$key\n";
-#			print {$blat_atx} "$pair->{QUERY_ALIGN}\n";
-#			print {$blat_atx} "$pair->{MATCH_ALIGN}\n\n";
-#		}
-#		close($blat_atx);
-#
-#		# use KaKs_Calculator to determine Ks between homologus pairs
-#		$return = system("$kaks_calc -i $base_name.atx -o $base_name.kaks -m $model >/dev/null") if (!-e "$base_name.kaks");
-#		die "Error running KaKs_Calculator: '$return'.\n" if ($return);
-#
-#		# Select gene pairs with Ks between $lower_ks and $upper_ks
-#		my %genes;
-#
-#		open(my $kaks_output, "<", $base_name.".kaks");
-#		#open(my $gene_subset, ">", $base_name.".ks_$lower_ks-$upper_ks.fasta");
-#		open(my $gene_subset, ">", $base_name.".pairs.fasta");
-#
-#		while (my $line = <$kaks_output>) {
-#			chomp($line);
-#
-#			next if ($line =~ /^Sequence/);
-#
-#			my @line = split(/\s+/, $line);
-#			my $ks = $line[3];
-#			$ks = 0 if ($ks eq "NA");
-#
-#	#		if ($ks >= $lower_ks && $ks <= $upper_ks) {
-#				(my $pair_name = $line[0]) =~ s/^>//;
-#
-#				if ($pair_name =~ /q_(.*)_t_(.*)/) {
-#					my ($query_name, $match_name) = ($1, $2);
-##					print $query_name, " ", $match_name,"\n";
-#
-#					#my $found_match = 0;
-##					foreach my $key (keys %matches) {
-##						if ($key eq $pair_name) {
-##							my $pair = $matches{$key};
-##							print {$gene_subset} ">$pair_name\n";
-##							print {$gene_subset} $pair->{QUERY_ALIGN_PROT},"\n";
-##							$found_match++;
-##							last;
-##						}
-##					}
-#					my $pair = $matches{$pair_name};
-#					print {$gene_subset} ">$pair_name\n";
-#					print {$gene_subset} $pair->{QUERY_ALIGN_PROT},"\n";
-#					#die "Could not locate match: '$pair_name'\n" if (!$found_match);
-#				}
-#		}
-#		close($kaks_output);
-#		close($gene_subset);
-#
-#		exit(0);
-#	}
-#	else {
-#		push(@pids, $pid);
-#	}
-}
-
-# Wait until everything is complete
-foreach my $pid (@pids) {
-	waitpid($pid, 0);
+	# Store output filenames
+	(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
+	my $output_file = $transcriptome_name.".$model.pairs.fasta";
+	push(@gene_pairs, $output_file);
 }
 
 # Run proteinortho using subset of genes of base transcriptome against all other transcriptomes 
@@ -594,8 +405,10 @@ sub run_kaks_calc {
 	my $lines_per_thread = ceil($total_hits / $free_cpus) * 4;
 
 	# Create the directories that will hold the split files and their KaKs_Calculator output
-	mkdir("$kaks_calc_in_dir") || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
-	mkdir("$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
+#	mkdir("$kaks_calc_in_dir") || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
+#	mkdir("$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
+	mkdir("$kaks_calc_in_dir") if (!-e $kaks_calc_in_dir);
+	mkdir("$kaks_calc_out_dir") if (!-e $kaks_calc_out_dir);
 
 	# Split the files
 	#run_cmd("split -l $lines_per_thread $paralogs_seqs $kaks_calc_in_dir/$paralogs_seqs.");
@@ -845,7 +658,7 @@ sub analyze_family {
 	write_phylip({'OUT' => $family_aligned, 'ALIGN' => \%family_aligned_nuc});
 
 	# Run RAxML
-	system("raxmlHPC -f a -m GTRGAMMA -p 123123 -x 123123 -#100 -s '$family_aligned' -n $id >/dev/null");
+	system("$raxml -f a -m GTRGAMMA -p 123123 -x 123123 -#100 -s '$family_aligned' -n $id >/dev/null");
 
 	# Parse RAxML output
 	open(my $raxml_out, "<", "RAxML_bipartitions.$id");
