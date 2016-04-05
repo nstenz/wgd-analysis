@@ -129,31 +129,15 @@ foreach my $index (0 .. $#transcriptomes) {
 	$lower_ks = $ks{"$index-LOWER"};
 	$upper_ks = $ks{"$index-UPPER"};
 
-	# Wait until a CPU is free
-	until(okay_to_run(\@pids)) {};
+	# Identify protein pairs in transcriptome and calculate Ks
+	extract_protein_pairs($transcriptome, $lower_ks, $upper_ks);
 
-	# Perform fork
-	my $pid = fork();
-	if ($pid == 0) {
-		setpgrp();
-		extract_protein_pairs($transcriptome, $lower_ks, $upper_ks);
-		exit(0);
-	}
-	else {
-		# Store output filename
-		(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
-		my $output_file = $transcriptome_name.".$model.ks_$lower_ks-$upper_ks";
-		push(@gene_pairs, $output_file);
-
-		# Store child pid
-		push(@pids, $pid);
-	}
+	# Store output filenames
+	(my $transcriptome_name = $transcriptome) =~ s/(.*\/)?(.*)/$2/;
+	my $output_file = $transcriptome_name.".$model.ks_$lower_ks-$upper_ks";
+	push(@gene_pairs, $output_file);
 }
 
-# Wait until everything is complete
-foreach my $pid (@pids) {
-	waitpid($pid, 0);
-}
 
 # Run proteinortho using subset of genes of base transcriptome against all other transcriptomes 
 my $return = system("$protein_ortho @gene_pairs -clean -project=wgd-test") if (!-e "wgd-test.proteinortho");
